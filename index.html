@@ -1,387 +1,1503 @@
-const express = require('express');
-const sqlite3 = require('sqlite3').verbose();
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
-const cookieParser = require('cookie-parser');
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
-const crypto = require('crypto');
-const CryptoJS = require('crypto-js');
-const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
-const { body, validationResult } = require('express-validator'); // ✅ Добавляем валидацию
-require('dotenv').config();
-
-const app = express();
-const PORT = process.env.PORT || 3001;
-const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('hex'); // ✅ Генерируем надёжный ключ
-
-// ============ БЕЗОПАСНОСТЬ ============
-app.use(helmet({
-    contentSecurityPolicy: {
-        directives: {
-            defaultSrc: ["'self'"],
-            styleSrc: ["'self'", "'unsafe-inline'"],
-            scriptSrc: ["'self'"],
-            imgSrc: ["'self'", "data:"],
-            connectSrc: ["'self'"]
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" id="csrf-token" content="">
+    <title>Shadow Lanterns</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            background: #000; 
+            color: #0cf; 
+            font-family: 'Courier New', monospace; 
+            padding: 20px;
+            min-height: 100vh;
         }
-    }
-}));
-
-// ✅ Защита от CSRF
-const csrf = require('csurf');
-const csrfProtection = csrf({ cookie: true });
-app.use(csrfProtection);
-
-// ✅ Более строгий rate limiting
-const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 100,
-    standardHeaders: true,
-    legacyHeaders: false,
-});
-app.use('/api/', limiter);
-
-const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 3, // ✅ Уменьшаем до 3 попыток
-});
-app.use('/api/login', authLimiter);
-app.use('/api/register', authLimiter);
-
-app.use(express.json({ limit: '1mb' })); // ✅ Ограничиваем размер
-app.use(express.static('public', { maxAge: '1d' }));
-app.use(cookieParser());
-
-// ============ БАЗА ДАННЫХ С ШИФРОВАНИЕМ ============
-// ✅ Функция для шифрования чувствительных данных
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || crypto.randomBytes(32).toString('hex');
-
-function encryptSecret(text, password) {
-    // Используем комбинацию пароля и ключа
-    const combinedKey = CryptoJS.PBKDF2(password, ENCRYPTION_KEY, { keySize: 256/32, iterations: 10000 });
-    return CryptoJS.AES.encrypt(text, combinedKey.toString()).toString();
-}
-
-function decryptSecret(encrypted, password) {
-    const combinedKey = CryptoJS.PBKDF2(password, ENCRYPTION_KEY, { keySize: 256/32, iterations: 10000 });
-    const decrypted = CryptoJS.AES.decrypt(encrypted, combinedKey.toString());
-    return decrypted.toString(CryptoJS.enc.Utf8);
-}
-
-// ============ БЕЗОПАСНЫЕ SQL-ЗАПРОСЫ ============
-// ✅ Всегда используем параметризованные запросы!
-function safeQuery(sql, params = []) {
-    return new Promise((resolve, reject) => {
-        db.get(sql, params, (err, row) => {
-            if (err) reject(err);
-            else resolve(row);
-        });
-    });
-}
-
-function safeAll(sql, params = []) {
-    return new Promise((resolve, reject) => {
-        db.all(sql, params, (err, rows) => {
-            if (err) reject(err);
-            else resolve(rows);
-        });
-    });
-}
-
-function safeRun(sql, params = []) {
-    return new Promise((resolve, reject) => {
-        db.run(sql, params, function(err) {
-            if (err) reject(err);
-            else resolve(this);
-        });
-    });
-}
-
-// ============ АУТЕНТИФИКАЦИЯ ============
-const auth = (req, res, next) => {
-    const token = req.cookies.token;
-    if (!token) {
-        return res.status(401).json({ error: 'Unauthorized' });
-    }
-    try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        req.userId = decoded.userId;
-        req.isAdmin = decoded.isAdmin;
-        next();
-    } catch (err) {
-        res.status(401).json({ error: 'Invalid token' });
-    }
-};
-
-// ✅ Проверка прав администратора
-const adminOnly = (req, res, next) => {
-    if (!req.isAdmin) {
-        return res.status(403).json({ error: 'Forbidden' });
-    }
-    next();
-};
-
-// ============ API ============
-app.post('/api/register', [
-    body('globalKey').isString().notEmpty(),
-    body('username').isLength({ min: 3, max: 30 }).matches(/^[a-zA-Z0-9_]+$/),
-    body('password').isLength({ min: 8 }) // ✅ Минимум 8 символов
-], async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-        return res.status(400).json({ error: errors.array()[0].msg });
-    }
-
-    const { globalKey, username, password } = req.body;
+        .container { max-width: 1200px; margin: auto; }
+        
+        /* Header */
+        .header { 
+            text-align: center; 
+            margin-bottom: 2rem; 
+            border-bottom: 1px solid #0cf; 
+            padding-bottom: 1rem; 
+        }
+        .header h1 { 
+            color: #0cf; 
+            font-size: 2.5rem; 
+            font-weight: 400;
+            text-shadow: 0 0 20px rgba(0, 204, 255, 0.3);
+        }
+        .slogan { 
+            font-style: italic; 
+            color: #0cf;
+            opacity: 0.8;
+        }
+        
+        /* Navigation */
+        .nav { 
+            display: flex; 
+            flex-wrap: wrap; 
+            justify-content: center; 
+            gap: 0.8rem; 
+            margin: 2rem 0; 
+        }
+        .nav button, .round-btn { 
+            background: transparent; 
+            color: #0cf; 
+            border: 1px solid #0cf; 
+            padding: 8px 18px; 
+            border-radius: 40px; 
+            cursor: pointer; 
+            transition: all 0.3s;
+            font-family: inherit;
+            font-size: 0.9rem;
+        }
+        .nav button:hover, .round-btn:hover { 
+            background: #0cf; 
+            color: #000; 
+            box-shadow: 0 0 20px rgba(0, 204, 255, 0.3);
+        }
+        .nav button:active, .round-btn:active {
+            transform: scale(0.95);
+        }
+        
+        /* User Panel */
+        .user-panel { 
+            display: flex; 
+            justify-content: flex-end; 
+            align-items: center; 
+            gap: 1rem; 
+            margin-bottom: 2rem; 
+        }
+        .username { 
+            color: #0cf;
+            opacity: 0.9;
+            font-size: 0.9rem;
+        }
+        
+        /* Posts */
+        .posts-grid { 
+            display: flex; 
+            flex-direction: column; 
+            gap: 1.5rem; 
+            margin: 2rem 0; 
+        }
+        .post-card { 
+            background: #0a0a0a; 
+            border: 1px solid #1a3a3a; 
+            border-radius: 24px; 
+            padding: 1.5rem;
+            transition: all 0.3s;
+        }
+        .post-card:hover {
+            border-color: #0cf;
+            box-shadow: 0 0 30px rgba(0, 204, 255, 0.05);
+        }
+        .post-card.secret { 
+            border-color: #0cf; 
+            background: #0a0508;
+            box-shadow: 0 0 30px rgba(0, 204, 255, 0.1);
+        }
+        .post-title { 
+            color: #0cf; 
+            font-size: 1.4rem;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+        .post-meta { 
+            color: #555; 
+            font-size: 0.7rem;
+            margin-bottom: 1rem;
+        }
+        .post-content { 
+            margin: 1rem 0; 
+            white-space: pre-wrap;
+            word-break: break-word;
+            line-height: 1.6;
+        }
+        .post-file {
+            margin: 0.5rem 0;
+        }
+        .post-file a {
+            color: #0cf;
+            text-decoration: none;
+            border-bottom: 1px dashed #0cf;
+        }
+        .post-file a:hover {
+            border-bottom: 1px solid #0cf;
+        }
+        
+        /* Comments */
+        .comments-section { 
+            margin-top: 1.5rem; 
+            border-top: 1px solid #1a3a3a; 
+            padding-top: 1rem; 
+        }
+        .comment { 
+            background: #000; 
+            padding: 0.7rem;
+            margin: 0.7rem 0; 
+            border-radius: 16px;
+            border-left: 2px solid #0cf;
+        }
+        .comment-meta { 
+            color: #555; 
+            font-size: 0.7rem;
+            margin-bottom: 0.3rem;
+        }
+        .comment-edit { 
+            font-size: 0.7rem; 
+            background: none; 
+            border: none; 
+            color: #0cf; 
+            cursor: pointer; 
+            margin-left: 0.5rem;
+            opacity: 0.6;
+            transition: opacity 0.3s;
+        }
+        .comment-edit:hover {
+            opacity: 1;
+        }
+        .comment-input { 
+            display: flex; 
+            gap: 0.5rem; 
+            margin-top: 0.5rem; 
+        }
+        .comment-input input { 
+            flex: 1; 
+            background: #111; 
+            border: 1px solid #1a3a3a; 
+            padding: 0.5rem 1rem; 
+            border-radius: 40px; 
+            color: #0cf;
+            font-family: inherit;
+            transition: border-color 0.3s;
+        }
+        .comment-input input:focus {
+            outline: none;
+            border-color: #0cf;
+        }
+        .comment-input button { 
+            background: #0cf; 
+            border: none; 
+            color: #000; 
+            padding: 0.5rem 1.5rem; 
+            border-radius: 40px; 
+            cursor: pointer;
+            font-family: inherit;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+        .comment-input button:hover {
+            box-shadow: 0 0 20px rgba(0, 204, 255, 0.3);
+            transform: scale(1.02);
+        }
+        
+        /* Pagination */
+        .pagination { 
+            display: flex; 
+            justify-content: center; 
+            gap: 0.8rem; 
+            margin: 2rem 0; 
+        }
+        .pagination button { 
+            background: transparent; 
+            border: 1px solid #0cf; 
+            color: #0cf; 
+            width: 40px; 
+            height: 40px; 
+            border-radius: 50%; 
+            cursor: pointer;
+            transition: all 0.3s;
+            font-family: inherit;
+        }
+        .pagination button:hover {
+            background: rgba(0, 204, 255, 0.1);
+        }
+        .pagination button.active-page { 
+            background: #0cf; 
+            color: #000; 
+            box-shadow: 0 0 20px rgba(0, 204, 255, 0.3);
+        }
+        
+        /* Admin Panel */
+        .admin-panel { 
+            background: #0a0a0a; 
+            border: 1px solid #0cf; 
+            border-radius: 28px; 
+            padding: 1.5rem; 
+            margin-bottom: 2rem;
+        }
+        .admin-panel h3 {
+            margin-bottom: 1rem;
+            color: #0cf;
+        }
+        .admin-panel input, 
+        .admin-panel textarea { 
+            background: #111; 
+            border: 1px solid #1a3a3a; 
+            color: #0cf; 
+            padding: 0.5rem 1rem; 
+            border-radius: 24px; 
+            width: 100%; 
+            margin-bottom: 1rem;
+            font-family: inherit;
+            transition: border-color 0.3s;
+        }
+        .admin-panel input:focus,
+        .admin-panel textarea:focus {
+            outline: none;
+            border-color: #0cf;
+        }
+        .admin-panel textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+        .checkbox-label { 
+            display: flex; 
+            align-items: center; 
+            gap: 0.8rem; 
+            margin: 1rem 0;
+            color: #0cf;
+        }
+        .checkbox-label input[type="checkbox"] {
+            width: auto;
+            margin: 0;
+            accent-color: #0cf;
+        }
+        .admin-panel hr {
+            border: none;
+            border-top: 1px solid #1a3a3a;
+            margin: 1.5rem 0;
+        }
+        
+        /* Login Screen */
+        #loginScreen { 
+            text-align: center; 
+            margin-top: 100px;
+            max-width: 500px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        #loginScreen h1 {
+            font-size: 3rem;
+            margin-bottom: 0.5rem;
+            text-shadow: 0 0 40px rgba(0, 204, 255, 0.2);
+        }
+        #loginScreen p {
+            margin-bottom: 2rem;
+            opacity: 0.7;
+        }
+        #loginScreen input { 
+            width: 100%;
+            max-width: 350px;
+            display: block;
+            margin: 10px auto;
+            background: #111;
+            border: 1px solid #1a3a3a;
+            color: #0cf;
+            padding: 0.7rem 1rem;
+            border-radius: 40px;
+            font-family: inherit;
+            transition: border-color 0.3s;
+        }
+        #loginScreen input:focus {
+            outline: none;
+            border-color: #0cf;
+        }
+        #loginScreen .round-btn {
+            margin: 5px 5px;
+            padding: 0.7rem 2rem;
+            min-width: 120px;
+        }
+        #errorMsg {
+            color: #ff4444;
+            margin-top: 1rem;
+            min-height: 1.5rem;
+        }
+        
+        /* Secret Row */
+        .secret-row { 
+            display: flex; 
+            justify-content: center; 
+            gap: 1rem; 
+            margin-bottom: 2rem; 
+        }
+        .secret-row input { 
+            background: #111; 
+            border: 1px solid #1a3a3a; 
+            color: #0cf; 
+            padding: 0.5rem 1rem; 
+            border-radius: 40px; 
+            width: 250px;
+            font-family: inherit;
+            transition: border-color 0.3s;
+        }
+        .secret-row input:focus {
+            outline: none;
+            border-color: #0cf;
+        }
+        .secret-row button { 
+            background: #0cf; 
+            border: none; 
+            color: #000; 
+            padding: 0.5rem 1.5rem; 
+            border-radius: 40px; 
+            cursor: pointer;
+            font-family: inherit;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+        .secret-row button:hover {
+            box-shadow: 0 0 20px rgba(0, 204, 255, 0.3);
+        }
+        
+        /* Chat */
+        .chat-container {
+            background: #0a0a0a;
+            border-radius: 28px;
+            padding: 1.5rem;
+        }
+        .chat-messages {
+            max-height: 400px;
+            overflow-y: auto;
+            margin-bottom: 1rem;
+            padding: 0.5rem;
+        }
+        .chat-messages::-webkit-scrollbar {
+            width: 6px;
+        }
+        .chat-messages::-webkit-scrollbar-track {
+            background: #0a0a0a;
+        }
+        .chat-messages::-webkit-scrollbar-thumb {
+            background: #0cf;
+            border-radius: 3px;
+        }
+        .chat-message {
+            padding: 0.5rem;
+            border-bottom: 1px solid #1a3a3a;
+        }
+        .chat-message .username {
+            color: #0cf;
+            font-weight: bold;
+        }
+        .chat-message .time {
+            color: #555;
+            font-size: 0.7rem;
+            margin-left: 0.5rem;
+        }
+        .chat-input {
+            display: flex;
+            gap: 0.5rem;
+        }
+        .chat-input input {
+            flex: 1;
+            background: #111;
+            border: 1px solid #1a3a3a;
+            padding: 0.5rem 1rem;
+            border-radius: 40px;
+            color: #0cf;
+            font-family: inherit;
+            transition: border-color 0.3s;
+        }
+        .chat-input input:focus {
+            outline: none;
+            border-color: #0cf;
+        }
+        
+        /* Folders */
+        .folder-item {
+            background: #0a0a0a;
+            border: 1px solid #1a3a3a;
+            border-radius: 24px;
+            padding: 1rem;
+            margin-bottom: 0.5rem;
+            transition: all 0.3s;
+        }
+        .folder-item:hover {
+            border-color: #0cf;
+        }
+        .folder-add {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+        .folder-add input {
+            flex: 1;
+            background: #111;
+            border: 1px solid #1a3a3a;
+            padding: 0.5rem 1rem;
+            border-radius: 40px;
+            color: #0cf;
+            font-family: inherit;
+        }
+        .folder-add input:focus {
+            outline: none;
+            border-color: #0cf;
+        }
+        
+        /* Floating Emojis */
+        .floating-container { 
+            position: fixed; 
+            bottom: 20px; 
+            right: 20px; 
+            pointer-events: none; 
+            z-index: 1000; 
+        }
+        .float-emoji { 
+            position: absolute; 
+            font-size: 1.8rem; 
+            animation: floatUp 2.5s ease-out forwards; 
+            opacity: 0;
+            filter: drop-shadow(0 0 10px rgba(0, 204, 255, 0.3));
+        }
+        @keyframes floatUp { 
+            0% { 
+                opacity: 1; 
+                transform: translateY(0) scale(1);
+            }
+            100% { 
+                opacity: 0; 
+                transform: translateY(-120px) scale(0.5);
+            } 
+        }
+        
+        /* Utilities */
+        .hidden { display: none; }
+        .text-center { text-align: center; }
+        .mt-2 { margin-top: 2rem; }
+        .color-muted { color: #555; }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .header h1 { font-size: 2rem; }
+            .nav { gap: 0.5rem; }
+            .nav button { padding: 6px 12px; font-size: 0.8rem; }
+            .post-card { padding: 1rem; }
+            .secret-row { flex-direction: column; align-items: center; }
+            .secret-row input { width: 100%; max-width: 300px; }
+            #loginScreen { margin-top: 50px; }
+        }
+        
+        @media (max-width: 480px) {
+            body { padding: 10px; }
+            .header h1 { font-size: 1.5rem; }
+            .post-title { font-size: 1.1rem; }
+            .comment-input { flex-direction: column; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <!-- Login Screen -->
+    <div id="loginScreen">
+        <h1>Shadow Lanterns</h1>
+        <p>Deliver pizza. Or death.</p>
+        <input type="password" id="globalKey" placeholder="Global Key" autocomplete="off">
+        <input type="text" id="loginUsername" placeholder="Username" autocomplete="off">
+        <input type="password" id="loginPassword" placeholder="Password" autocomplete="off">
+        <div>
+            <button class="round-btn" onclick="doLogin()">Login</button>
+            <button class="round-btn" onclick="doRegister()">Register</button>
+        </div>
+        <p id="errorMsg"></p>
+    </div>
     
-    // ✅ Используем constant-time сравнение
-    if (!crypto.timingSafeEqual(Buffer.from(globalKey), Buffer.from('silence'))) {
-        return res.status(403).json({ error: 'Invalid key' });
+    <!-- Main Content -->
+    <div id="mainContent" style="display:none;">
+        <div class="header">
+            <h1>Shadow Lanterns</h1>
+            <div class="slogan">Deliver pizza. Or death.</div>
+            <button class="round-btn" onclick="logout()" style="margin-top:1rem;">✕ Log Out</button>
+        </div>
+        
+        <div class="user-panel">
+            <span class="username" id="loggedUserName"></span>
+        </div>
+        
+        <div class="nav">
+            <button onclick="showFeed()">📰 Feed</button>
+            <button onclick="showChat()">💬 Chat</button>
+            <button onclick="showFav()">⭐ Fav</button>
+            <button onclick="showFolders()">📁 Folders</button>
+            <button onclick="showAddPost()">✏️ Add Post</button>
+            <button id="inviteBtn" style="display:none;" onclick="showInvite()">🔑 Invite</button>
+        </div>
+        
+        <div id="secretRow" class="secret-row" style="display:none;"></div>
+        <div id="adminPanel"></div>
+        <div id="postsContainer" class="posts-grid"></div>
+        <div id="paginationContainer" class="pagination"></div>
+    </div>
+</div>
+
+<!-- Floating Container for Emojis -->
+<div class="floating-container" id="floatingContainer"></div>
+
+<script>
+    // ============ БЕЗОПАСНОСТЬ ============
+    // Защита от кликджекинга
+    if (window.top !== window.self) {
+        window.top.location = window.self.location;
     }
 
-    try {
-        const salt = await bcrypt.genSalt(12); // ✅ 12 раундов
-        const hash = await bcrypt.hash(password, salt);
-        
-        const result = await safeRun(
-            'INSERT INTO users (username, password) VALUES (?, ?)',
-            [username, hash]
-        );
-        
-        const token = jwt.sign(
-            { userId: result.lastID, isAdmin: 0 },
-            JWT_SECRET,
-            { expiresIn: '1d' } // ✅ Уменьшаем время жизни
-        );
-        
-        res.cookie('token', token, {
-            httpOnly: true,
-            secure: true, // ✅ Всегда true в продакшене
-            sameSite: 'strict',
-            maxAge: 24 * 60 * 60 * 1000,
-            domain: process.env.COOKIE_DOMAIN || undefined
+    // Безопасное экранирование HTML
+    function escapeHtml(str) {
+        if (!str) return '';
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
+    // Санитайзинг ввода
+    function sanitizeInput(input) {
+        if (!input) return '';
+        return input.replace(/[<>"']/g, function(match) {
+            return {
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            }[match] || match;
         });
-        
-        res.json({ success: true, username, isAdmin: false });
-    } catch(e) {
-        // ✅ Не выводим детали ошибки
-        if (e.message.includes('UNIQUE')) {
-            res.status(400).json({ error: 'Username already exists' });
-        } else {
-            res.status(500).json({ error: 'Registration failed' });
-        }
-    }
-});
-
-app.post('/api/login', [
-    body('globalKey').isString().notEmpty(),
-    body('username').isString().notEmpty(),
-    body('password').isString().notEmpty()
-], async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-        return res.status(400).json({ error: 'Invalid input' });
     }
 
-    const { globalKey, username, password } = req.body;
-    
-    if (!crypto.timingSafeEqual(Buffer.from(globalKey), Buffer.from('silence'))) {
-        return res.status(403).json({ error: 'Invalid key' });
+    // Проверка на SQL инъекции (клиентская)
+    function isSafeInput(str) {
+        if (!str) return true;
+        const dangerous = ['--', ';', '/*', '*/', 'xp_', 'exec', 'union', 'select', 'insert', 'update', 'delete', 'drop'];
+        const lower = str.toLowerCase();
+        return !dangerous.some(d => lower.includes(d));
     }
 
-    try {
-        const user = await safeQuery(
-            'SELECT * FROM users WHERE username = ?',
-            [username]
-        );
-        
-        if (!user) {
-            // ✅ Имитируем задержку для защиты от timing attacks
-            await bcrypt.hash('dummy', 12);
-            return res.status(401).json({ error: 'Invalid credentials' });
-        }
-        
-        const valid = await bcrypt.compare(password, user.password);
-        if (!valid) {
-            await bcrypt.hash('dummy', 12);
-            return res.status(401).json({ error: 'Invalid credentials' });
-        }
+    // CSRF токен
+    function getCsrfToken() {
+        return document.querySelector('meta[name="csrf-token"]')?.content || '';
+    }
 
-        const token = jwt.sign(
-            { userId: user.id, isAdmin: user.isAdmin },
-            JWT_SECRET,
-            { expiresIn: '1d' }
-        );
-        
-        res.cookie('token', token, {
-            httpOnly: true,
-            secure: true,
-            sameSite: 'strict',
-            maxAge: 24 * 60 * 60 * 1000,
-            domain: process.env.COOKIE_DOMAIN || undefined
+    // ============ API КЛИЕНТ ============
+    async function apiCall(url, opts = {}) {
+        const headers = {
+            'Content-Type': 'application/json',
+            ...(opts.headers || {})
+        };
+
+        const res = await fetch(url, {
+            ...opts,
+            credentials: 'include',
+            headers
         });
-        
-        res.json({ success: true, username, isAdmin: user.isAdmin === 1 });
-    } catch(e) {
-        res.status(500).json({ error: 'Login failed' });
-    }
-});
 
-// ✅ POSTS с безопасной обработкой
-app.post('/api/posts', [
-    auth,
-    upload.single('file'),
-    body('content').isString().isLength({ max: 5000 }),
-    body('title').optional().isString().isLength({ max: 200 }),
-    body('is_secret').optional().isBoolean()
-], async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-        return res.status(400).json({ error: 'Invalid input' });
-    }
-
-    const { title, content, hashtags, folderId, is_secret, secret_password } = req.body;
-    
-    let media = null;
-    let filePath = null;
-    let encryptedSecret = null;
-    
-    if (req.file) {
-        // ✅ Проверяем тип файла
-        const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'video/mp4'];
-        if (!allowedTypes.includes(req.file.mimetype)) {
-            fs.unlinkSync(req.file.path);
-            return res.status(400).json({ error: 'Invalid file type' });
+        // Проверяем ответ
+        if (res.status === 401) {
+            logout();
+            throw new Error('Session expired');
         }
-        filePath = '/uploads/' + req.file.filename;
-        media = JSON.stringify({ type: req.file.mimetype.split('/')[0], path: filePath });
+
+        const text = await res.text();
+        try {
+            const json = JSON.parse(text);
+            if (!res.ok) {
+                throw new Error(json.error || 'API error');
+            }
+            return json;
+        } catch(e) {
+            if (res.ok) return text;
+            throw new Error('Server error');
+        }
     }
 
-    // ✅ Шифруем пароль секретного поста
-    if (is_secret === 'true' && secret_password) {
-        encryptedSecret = encryptSecret(secret_password, secret_password);
+    // ============ СОСТОЯНИЕ ============
+    let currentUser = null;
+    let currentSection = 'feed';
+    let currentPage = 1;
+    let totalPages = 1;
+    let secretActive = false;
+    let chatInterval = null;
+
+    // ============ FLOATING EMOJIS ============
+    function floatSymbols(symbols, count = 5) {
+        const c = document.getElementById('floatingContainer');
+        if (!c) return;
+        
+        for (let i = 0; i < count; i++) {
+            const d = document.createElement('div');
+            d.className = 'float-emoji';
+            d.textContent = symbols[Math.floor(Math.random() * symbols.length)];
+            d.style.left = (10 + Math.random() * 80) + '%';
+            d.style.bottom = '0px';
+            d.style.fontSize = (1.5 + Math.random() * 1.5) + 'rem';
+            c.appendChild(d);
+            setTimeout(() => {
+                if (d.parentNode) d.remove();
+            }, 2500);
+        }
     }
 
-    try {
-        await safeRun(
-            `INSERT INTO posts (user_id, title, content, hashtags, media, folder_id, is_secret, secret_password, file_path) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [req.userId, title, content, hashtags, media, folderId || null, 
-             is_secret === 'true' ? 1 : 0, encryptedSecret, filePath]
-        );
-        res.json({ id: this.lastID });
-    } catch(e) {
-        res.status(500).json({ error: 'Failed to create post' });
-    }
-});
-
-// ✅ Secure secret post access
-app.post('/api/posts/secret', auth, async (req, res) => {
-    const { section, password } = req.body;
-    if (!password) return res.status(400).json({ error: 'Password required' });
-
-    try {
-        const posts = await safeAll(
-            `SELECT p.*, u.username FROM posts p
-             JOIN users u ON p.user_id = u.id
-             WHERE p.is_secret = 1
-             ORDER BY p.created_at DESC`
-        );
-
-        // ✅ Проверяем пароль для каждого поста
-        const decryptedPosts = [];
-        for (const post of posts) {
-            try {
-                const decrypted = decryptSecret(post.secret_password, password);
-                if (decrypted) {
-                    decryptedPosts.push(post);
+    // ============ АУТЕНТИФИКАЦИЯ ============
+    async function loadUser() {
+        try {
+            const data = await apiCall('/api/me');
+            if (data && data.username) {
+                currentUser = data;
+                document.getElementById('loginScreen').style.display = 'none';
+                document.getElementById('mainContent').style.display = 'block';
+                document.getElementById('loggedUserName').innerText = '👤 ' + escapeHtml(currentUser.username);
+                
+                if (currentUser.isAdmin) {
+                    document.getElementById('inviteBtn').style.display = 'inline-block';
                 }
+                
+                showFeed();
+                floatSymbols(['✦', '✧', '⋆', '·', '✶'], 3);
+            }
+        } catch(e) {
+            // Пользователь не авторизован
+            document.getElementById('loginScreen').style.display = 'block';
+            document.getElementById('mainContent').style.display = 'none';
+        }
+    }
+
+    async function doLogin() {
+        const globalKey = document.getElementById('globalKey').value.trim();
+        const username = document.getElementById('loginUsername').value.trim();
+        const password = document.getElementById('loginPassword').value;
+
+        // Валидация
+        if (!globalKey || !username || !password) {
+            document.getElementById('errorMsg').innerText = '⚠️ All fields are required';
+            return;
+        }
+        
+        if (!isSafeInput(username)) {
+            document.getElementById('errorMsg').innerText = '⚠️ Invalid characters in username';
+            return;
+        }
+
+        try {
+            const res = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ globalKey, username, password })
+            });
+
+            const data = await res.json();
+            if (res.ok) {
+                currentUser = { 
+                    username: data.username, 
+                    isAdmin: data.isAdmin 
+                };
+                document.getElementById('loginScreen').style.display = 'none';
+                document.getElementById('mainContent').style.display = 'block';
+                document.getElementById('loggedUserName').innerText = '👤 ' + escapeHtml(currentUser.username);
+                
+                if (currentUser.isAdmin) {
+                    document.getElementById('inviteBtn').style.display = 'inline-block';
+                }
+                
+                document.getElementById('errorMsg').innerText = '';
+                showFeed();
+                floatSymbols(['✦', '✧', '⋆'], 5);
+            } else {
+                document.getElementById('errorMsg').innerText = '⚠️ ' + (data.error || 'Login failed');
+                // Задержка для защиты от брутфорса
+                await new Promise(r => setTimeout(r, 1000));
+            }
+        } catch(e) {
+            document.getElementById('errorMsg').innerText = '⚠️ Connection error';
+        }
+    }
+
+    async function doRegister() {
+        const globalKey = document.getElementById('globalKey').value.trim();
+        const username = document.getElementById('loginUsername').value.trim();
+        const password = document.getElementById('loginPassword').value;
+
+        if (!globalKey || !username || !password) {
+            document.getElementById('errorMsg').innerText = '⚠️ All fields are required';
+            return;
+        }
+
+        if (username.length < 3) {
+            document.getElementById('errorMsg').innerText = '⚠️ Username must be at least 3 characters';
+            return;
+        }
+
+        if (password.length < 8) {
+            document.getElementById('errorMsg').innerText = '⚠️ Password must be at least 8 characters';
+            return;
+        }
+
+        if (!isSafeInput(username)) {
+            document.getElementById('errorMsg').innerText = '⚠️ Invalid characters in username';
+            return;
+        }
+
+        try {
+            const res = await fetch('/api/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ globalKey, username, password })
+            });
+
+            const data = await res.json();
+            if (res.ok) {
+                document.getElementById('errorMsg').innerText = '✅ Registration successful!';
+                await doLogin();
+            } else {
+                document.getElementById('errorMsg').innerText = '⚠️ ' + (data.error || 'Registration failed');
+            }
+        } catch(e) {
+            document.getElementById('errorMsg').innerText = '⚠️ Connection error';
+        }
+    }
+
+    async function logout() {
+        if (chatInterval) {
+            clearInterval(chatInterval);
+            chatInterval = null;
+        }
+        
+        try {
+            await fetch('/api/logout', { 
+                method: 'POST', 
+                credentials: 'include' 
+            });
+        } catch(e) {
+            // Игнорируем ошибки при выходе
+        }
+        
+        currentUser = null;
+        document.getElementById('loginScreen').style.display = 'block';
+        document.getElementById('mainContent').style.display = 'none';
+        document.getElementById('errorMsg').innerText = '';
+        
+        // Очищаем поля
+        document.getElementById('loginPassword').value = '';
+        document.getElementById('globalKey').value = '';
+    }
+
+    // ============ ПОСТЫ ============
+    async function showFeed() {
+        secretActive = false;
+        currentSection = 'feed';
+        document.getElementById('paginationContainer').innerHTML = '';
+        
+        try {
+            const data = await apiCall(`/api/posts?page=${currentPage}`);
+            totalPages = data.totalPages;
+            renderPosts(data.posts);
+            renderPagination();
+            updateSecretRow();
+            renderAdminPanel();
+        } catch(e) {
+            document.getElementById('postsContainer').innerHTML = 
+                `<div class="text-center color-muted" style="padding:3rem;">⚠️ ${escapeHtml(e.message)}</div>`;
+        }
+    }
+
+    function renderPosts(posts) {
+        const container = document.getElementById('postsContainer');
+        if (!posts || !posts.length) {
+            container.innerHTML = '<div class="text-center color-muted" style="padding:3rem;">📭 No posts yet</div>';
+            return;
+        }
+
+        let html = '';
+        for (const p of posts) {
+            const isSecret = p.is_secret === 1;
+            const content = isSecret && !secretActive ? '🔒 [Secret post - unlock to view]' : escapeHtml(p.content || '');
+            
+            html += `
+                <div class="post-card ${isSecret ? 'secret' : ''}">
+                    <div class="post-title">${escapeHtml(p.title || 'Untitled')}</div>
+                    <div class="post-meta">
+                        👤 ${escapeHtml(p.username)} · ${new Date(p.created_at).toLocaleString()}
+                        ${isSecret ? ' · 🔒 Secret' : ''}
+                    </div>
+                    <div class="post-content">${content}</div>
+                    ${p.file_path ? `<div class="post-file">📎 <a href="${escapeHtml(p.file_path)}" target="_blank" rel="noopener">Attachment</a></div>` : ''}
+                    <div class="comments-section" id="comments-${p.id}">
+                        <div class="comment-input">
+                            <input id="commentInput-${p.id}" placeholder="Write a comment..." maxlength="500">
+                            <button onclick="addComment(${p.id})">Send</button>
+                        </div>
+                        <div id="commentList-${p.id}"></div>
+                    </div>
+                </div>
+            `;
+        }
+        container.innerHTML = html;
+
+        // Загружаем комментарии
+        for (const p of posts) {
+            loadComments(p.id);
+        }
+    }
+
+    // ============ КОММЕНТАРИИ ============
+    async function loadComments(postId) {
+        try {
+            const comments = await apiCall(`/api/comments/${postId}`);
+            const cdiv = document.getElementById(`commentList-${postId}`);
+            if (!cdiv) return;
+
+            if (!comments || !comments.length) {
+                cdiv.innerHTML = '<div class="comment color-muted" style="opacity:0.6;">No comments yet</div>';
+                return;
+            }
+
+            let html = '';
+            for (const c of comments) {
+                const isOwner = currentUser && (currentUser.id === c.user_id || currentUser.isAdmin);
+                html += `
+                    <div class="comment">
+                        <div class="comment-meta">
+                            👤 ${escapeHtml(c.username)} · ${new Date(c.created_at).toLocaleString()}
+                            ${isOwner ? `<button class="comment-edit" onclick="editComment(${c.id}, ${c.post_id}, '${escapeHtml(c.content)}')">✎ edit</button>` : ''}
+                        </div>
+                        <div>${escapeHtml(c.content)}</div>
+                    </div>
+                `;
+            }
+            cdiv.innerHTML = html;
+        } catch(e) {
+            // Игнорируем ошибки загрузки комментариев
+        }
+    }
+
+    window.addComment = async (postId) => {
+        if (!currentUser) {
+            alert('⚠️ Please log in to comment');
+            return;
+        }
+
+        const inp = document.getElementById(`commentInput-${postId}`);
+        if (!inp) return;
+        
+        const content = inp.value.trim();
+        if (!content) {
+            alert('⚠️ Comment cannot be empty');
+            return;
+        }
+
+        if (content.length > 500) {
+            alert('⚠️ Comment too long (max 500 characters)');
+            return;
+        }
+
+        if (!isSafeInput(content)) {
+            alert('⚠️ Invalid characters in comment');
+            return;
+        }
+
+        try {
+            await apiCall('/api/comments', { 
+                method: 'POST', 
+                body: JSON.stringify({ postId, content }) 
+            });
+            
+            floatSymbols(['✧', '✦', '⋆', '·'], 4);
+            inp.value = '';
+            loadComments(postId);
+        } catch(e) {
+            alert('⚠️ Error: ' + e.message);
+        }
+    };
+
+    window.editComment = async (id, postId, oldText) => {
+        const newText = prompt('Edit your comment:', oldText);
+        if (newText === null) return;
+        
+        const trimmed = newText.trim();
+        if (!trimmed) {
+            alert('⚠️ Comment cannot be empty');
+            return;
+        }
+
+        if (trimmed.length > 500) {
+            alert('⚠️ Comment too long (max 500 characters)');
+            return;
+        }
+
+        if (!isSafeInput(trimmed)) {
+            alert('⚠️ Invalid characters');
+            return;
+        }
+
+        try {
+            await fetch(`/api/comments/${id}`, {
+                method: 'PUT',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: trimmed })
+            });
+            loadComments(postId);
+            floatSymbols(['✎', '✧'], 2);
+        } catch(e) {
+            alert('⚠️ Error editing comment: ' + e.message);
+        }
+    };
+
+    // ============ ПАГИНАЦИЯ ============
+    function renderPagination() {
+        const cont = document.getElementById('paginationContainer');
+        if (totalPages <= 1) {
+            cont.innerHTML = '';
+            return;
+        }
+
+        let html = '';
+        for (let i = 1; i <= totalPages; i++) {
+            html += `<button class="${i === currentPage ? 'active-page' : ''}" onclick="goToPage(${i})">${i}</button>`;
+        }
+        cont.innerHTML = html;
+    }
+
+    window.goToPage = (page) => {
+        currentPage = page;
+        showFeed();
+    };
+
+    // ============ СЕКРЕТНЫЕ ПОСТЫ ============
+    function updateSecretRow() {
+        const row = document.getElementById('secretRow');
+        if (currentUser?.isAdmin || secretActive) {
+            row.innerHTML = `
+                <input type="password" id="secretKeyInput" placeholder="Enter secret key..." autocomplete="off">
+                <button id="unlockSecretBtn">🔓 Unlock</button>
+            `;
+            row.style.display = 'flex';
+            document.getElementById('unlockSecretBtn').onclick = unlockSecret;
+        } else {
+            row.style.display = 'none';
+        }
+    }
+
+    async function unlockSecret() {
+        const pwd = document.getElementById('secretKeyInput')?.value;
+        if (!pwd) {
+            alert('⚠️ Please enter the secret key');
+            return;
+        }
+
+        try {
+            const res = await fetch('/api/posts/secret', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ 
+                    section: currentSection, 
+                    password: pwd 
+                })
+            });
+
+            if (res.ok) {
+                const secretPosts = await res.json();
+                secretActive = true;
+                floatSymbols(['✦', '✧', '⋆', '✶', '·'], 8);
+                
+                if (secretPosts && secretPosts.length) {
+                    renderPosts(secretPosts);
+                } else {
+                    alert('🔒 No secret posts found with this key');
+                    secretActive = false;
+                }
+            } else {
+                const err = await res.json();
+                alert('⚠️ ' + (err.error || 'Wrong key or no secrets'));
+                secretActive = false;
+            }
+        } catch(e) {
+            alert('⚠️ Error: ' + e.message);
+            secretActive = false;
+        }
+    }
+
+    // ============ АДМИН ПАНЕЛЬ ============
+    function renderAdminPanel() {
+        if (!currentUser?.isAdmin) {
+            document.getElementById('adminPanel').innerHTML = '';
+            return;
+        }
+
+        document.getElementById('adminPanel').innerHTML = `
+            <div class="admin-panel">
+                <h3>✏️ New Publication</h3>
+                <input id="postTitle" placeholder="Title (optional)" maxlength="200">
+                <textarea id="postContent" rows="3" placeholder="Content (required)" maxlength="5000"></textarea>
+                <input type="file" id="postFile" accept=".jpg,.jpeg,.png,.gif,.webp,.mp4">
+                <div class="checkbox-label">
+                    <input type="checkbox" id="secretCheck"> 
+                    <label>🔒 Make it secret</label>
+                </div>
+                <div id="secretPasswordDiv" style="display:none;">
+                    <input type="password" id="secretPassword" placeholder="Secret password (min 8 chars)" autocomplete="off">
+                </div>
+                <button id="publishPostBtn" class="round-btn">📤 Publish</button>
+                
+                <hr>
+                
+                <h3>👑 Admin Actions</h3>
+                <input id="promoteUserId" placeholder="User ID to promote" type="number" min="1">
+                <button id="promoteBtn" class="round-btn">⬆ Promote to Admin</button>
+                
+                <hr>
+                
+                <h3>📊 Statistics</h3>
+                <button id="statsBtn" class="round-btn">📈 Show Stats</button>
+                <div id="statsContainer" style="margin-top:1rem;"></div>
+            </div>
+        `;
+
+        // Secret checkbox
+        document.getElementById('secretCheck').onchange = function(e) {
+            document.getElementById('secretPasswordDiv').style.display = e.target.checked ? 'block' : 'none';
+        };
+
+        // Publish
+        document.getElementById('publishPostBtn').onclick = async function() {
+            const title = document.getElementById('postTitle').value.trim();
+            const content = document.getElementById('postContent').value.trim();
+            const isSecret = document.getElementById('secretCheck').checked;
+            const secretPassword = document.getElementById('secretPassword')?.value || '';
+            const file = document.getElementById('postFile').files[0];
+
+            if (!content) {
+                alert('⚠️ Content is required');
+                return;
+            }
+
+            if (isSecret && secretPassword.length < 8) {
+                alert('⚠️ Secret password must be at least 8 characters');
+                return;
+            }
+
+            if (!isSafeInput(title) || !isSafeInput(content)) {
+                alert('⚠️ Invalid characters detected');
+                return;
+            }
+
+            const fd = new FormData();
+            fd.append('title', title);
+            fd.append('content', content);
+            fd.append('section', currentSection);
+            fd.append('is_secret', isSecret ? 'true' : 'false');
+            fd.append('secret_password', secretPassword);
+            if (file) fd.append('file', file);
+
+            try {
+                const res = await fetch('/api/posts', { 
+                    method: 'POST', 
+                    body: fd, 
+                    credentials: 'include' 
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    alert('⚠️ Error: ' + (err.error || 'Unknown error'));
+                    return;
+                }
+
+                // Очищаем форму
+                document.getElementById('postTitle').value = '';
+                document.getElementById('postContent').value = '';
+                document.getElementById('postFile').value = '';
+                document.getElementById('secretCheck').checked = false;
+                document.getElementById('secretPasswordDiv').style.display = 'none';
+                document.getElementById('secretPassword').value = '';
+
+                floatSymbols(['✦', '✧', '⋆'], 5);
+                showFeed();
             } catch(e) {
-                // Пароль не подходит
+                alert('⚠️ Error: ' + e.message);
+            }
+        };
+
+        // Promote user
+        document.getElementById('promoteBtn').onclick = async function() {
+            const userId = parseInt(document.getElementById('promoteUserId').value);
+            if (!userId || userId < 1) {
+                alert('⚠️ Please enter a valid user ID');
+                return;
+            }
+
+            if (!confirm(`⚠️ Are you sure you want to promote user #${userId} to admin?`)) {
+                return;
+            }
+
+            try {
+                await apiCall('/api/make-admin', { 
+                    method: 'POST', 
+                    body: JSON.stringify({ userId }) 
+                });
+                alert('✅ User promoted to admin successfully!');
+                document.getElementById('promoteUserId').value = '';
+                floatSymbols(['👑', '⭐'], 3);
+            } catch(e) {
+                alert('⚠️ Error: ' + e.message);
+            }
+        };
+
+        // Stats
+        document.getElementById('statsBtn').onclick = async function() {
+            try {
+                const users = await apiCall('/api/users');
+                const posts = await apiCall('/api/posts?page=1');
+                const container = document.getElementById('statsContainer');
+                
+                container.innerHTML = `
+                    <div style="background:#111; padding:1rem; border-radius:16px;">
+                        <div>👥 Users: ${users.length}</div>
+                        <div>📝 Posts: ${posts.totalPages > 0 ? posts.posts.length : 0}</div>
+                        <div>📄 Total pages: ${posts.totalPages || 0}</div>
+                    </div>
+                `;
+            } catch(e) {
+                alert('⚠️ Error loading stats: ' + e.message);
+            }
+        };
+    }
+
+    // ============ ЧАТ ============
+    async function showChat() {
+        currentSection = 'chat';
+        document.getElementById('paginationContainer').innerHTML = '';
+        
+        if (chatInterval) {
+            clearInterval(chatInterval);
+            chatInterval = null;
+        }
+
+        try {
+            const msgs = await apiCall('/api/chat');
+            
+            let html = `
+                <div class="chat-container">
+                    <h3>💬 Chat</h3>
+                    <div class="chat-messages" id="chatMessages">
+            `;
+            
+            for (const m of msgs) {
+                html += `
+                    <div class="chat-message">
+                        <span class="username">${escapeHtml(m.username)}</span>
+                        <span class="time">${new Date(m.created_at).toLocaleTimeString()}</span>
+                        <div>${escapeHtml(m.message)}</div>
+                    </div>
+                `;
+            }
+            
+            html += `
+                    </div>
+                    <div class="chat-input">
+                        <input id="chatMsg" placeholder="Type a message..." maxlength="500" autocomplete="off">
+                        <button class="round-btn" onclick="sendMsg()">Send</button>
+                    </div>
+                </div>
+            `;
+            
+            document.getElementById('postsContainer').innerHTML = html;
+            
+            // Скролл вниз
+            const msgsDiv = document.getElementById('chatMessages');
+            if (msgsDiv) {
+                msgsDiv.scrollTop = msgsDiv.scrollHeight;
+            }
+
+            // Автообновление каждые 3 секунды
+            chatInterval = setInterval(async () => {
+                try {
+                    const newMsgs = await apiCall('/api/chat');
+                    const container = document.getElementById('chatMessages');
+                    if (!container) return;
+                    
+                    // Просто перезагружаем всё сообщение
+                    let newHtml = '';
+                    for (const m of newMsgs) {
+                        newHtml += `
+                            <div class="chat-message">
+                                <span class="username">${escapeHtml(m.username)}</span>
+                                <span class="time">${new Date(m.created_at).toLocaleTimeString()}</span>
+                                <div>${escapeHtml(m.message)}</div>
+                            </div>
+                        `;
+                    }
+                    container.innerHTML = newHtml;
+                    
+                    // Скролл вниз если пользователь не скроллил вверх
+                    const shouldScroll = container.scrollTop + container.clientHeight >= container.scrollHeight - 100;
+                    if (shouldScroll) {
+                        container.scrollTop = container.scrollHeight;
+                    }
+                } catch(e) {
+                    // Игнорируем ошибки обновления
+                }
+            }, 3000);
+            
+        } catch(e) {
+            document.getElementById('postsContainer').innerHTML = 
+                `<div class="text-center color-muted" style="padding:3rem;">⚠️ ${escapeHtml(e.message)}</div>`;
+        }
+    }
+
+    async function sendMsg() {
+        const input = document.getElementById('chatMsg');
+        if (!input) return;
+        
+        const msg = input.value.trim();
+        if (!msg) {
+            alert('⚠️ Message cannot be empty');
+            return;
+        }
+
+        if (msg.length > 500) {
+            alert('⚠️ Message too long (max 500 characters)');
+            return;
+        }
+
+        if (!isSafeInput(msg)) {
+            alert('⚠️ Invalid characters in message');
+            return;
+        }
+
+        try {
+            await apiCall('/api/chat', { 
+                method: 'POST', 
+                body: JSON.stringify({ message: msg }) 
+            });
+            input.value = '';
+            floatSymbols(['✧', '·', '⋆'], 3);
+        } catch(e) {
+            alert('⚠️ Error sending message: ' + e.message);
+        }
+    }
+
+    // ============ ИЗБРАННОЕ ============
+    async function showFav() {
+        currentSection = 'fav';
+        document.getElementById('paginationContainer').innerHTML = '';
+        
+        if (chatInterval) {
+            clearInterval(chatInterval);
+            chatInterval = null;
+        }
+
+        try {
+            const favs = await apiCall('/api/favorites');
+            
+            if (!favs || !favs.length) {
+                document.getElementById('postsContainer').innerHTML = 
+                    '<div class="text-center color-muted" style="padding:3rem;">⭐ No favorites yet</div>';
+                return;
+            }
+
+            let html = '<h3>⭐ Favorites</h3>';
+            for (const p of favs) {
+                html += `
+                    <div class="post-card">
+                        <div class="post-meta">👤 ${escapeHtml(p.username)} · ${new Date(p.created_at).toLocaleString()}</div>
+                        <div class="post-content">${escapeHtml(p.content || '')}</div>
+                        ${p.file_path ? `<div class="post-file">📎 <a href="${escapeHtml(p.file_path)}" target="_blank" rel="noopener">Attachment</a></div>` : ''}
+                    </div>
+                `;
+            }
+            document.getElementById('postsContainer').innerHTML = html;
+        } catch(e) {
+            document.getElementById('postsContainer').innerHTML = 
+                `<div class="text-center color-muted" style="padding:3rem;">⚠️ ${escapeHtml(e.message)}</div>`;
+        }
+    }
+
+    // ============ ПАПКИ ============
+    async function showFolders() {
+        currentSection = 'folders';
+        document.getElementById('paginationContainer').innerHTML = '';
+        
+        if (chatInterval) {
+            clearInterval(chatInterval);
+            chatInterval = null;
+        }
+
+        try {
+            const folders = await apiCall('/api/folders');
+            
+            let html = '<h3>📁 Folders</h3>';
+            if (!folders || !folders.length) {
+                html += '<div class="text-center color-muted" style="padding:1rem;">No folders</div>';
+            } else {
+                for (const f of folders) {
+                    html += `
+                        <div class="folder-item">
+                            📁 ${escapeHtml(f.name)}
+                            ${f.isDefault ? ' <span style="color:#555;font-size:0.8rem;">(default)</span>' : ''}
+                        </div>
+                    `;
+                }
+            }
+
+            if (currentUser?.isAdmin) {
+                html += `
+                    <div class="folder-add">
+                        <input id="newFolder" placeholder="New folder name..." maxlength="50">
+                        <button class="round-btn" onclick="addFolder()">+ Add</button>
+                    </div>
+                `;
+            }
+
+            document.getElementById('postsContainer').innerHTML = html;
+        } catch(e) {
+            document.getElementById('postsContainer').innerHTML = 
+                `<div class="text-center color-muted" style="padding:3rem;">⚠️ ${escapeHtml(e.message)}</div>`;
+        }
+    }
+
+    async function addFolder() {
+        const input = document.getElementById('newFolder');
+        if (!input) return;
+        
+        const name = input.value.trim();
+        if (!name) {
+            alert('⚠️ Folder name cannot be empty');
+            return;
+        }
+
+        if (name.length < 2) {
+            alert('⚠️ Folder name must be at least 2 characters');
+            return;
+        }
+
+        if (!isSafeInput(name)) {
+            alert('⚠️ Invalid characters in folder name');
+            return;
+        }
+
+        try {
+            await apiCall('/api/folders', { 
+                method: 'POST', 
+                body: JSON.stringify({ name }) 
+            });
+            input.value = '';
+            floatSymbols(['📁', '✦'], 3);
+            showFolders();
+        } catch(e) {
+            alert('⚠️ Error: ' + e.message);
+        }
+    }
+
+    // ============ ДОБАВИТЬ ПОСТ ============
+    function showAddPost() {
+        currentSection = 'add';
+        document.getElementById('paginationContainer').innerHTML = '';
+        
+        if (chatInterval) {
+            clearInterval(chatInterval);
+            chatInterval = null;
+        }
+
+        document.getElementById('postsContainer').innerHTML = `
+            <div style="background:#0a0a0a; border:1px solid #1a3a3a; border-radius:28px; padding:1.5rem;">
+                <h3>✏️ Add Post</h3>
+                <textarea id="postContent" rows="4" placeholder="Content (required)" maxlength="5000" style="width:100%; background:#111; border:1px solid #1a3a3a; color:#0cf; padding:0.7rem 1rem; border-radius:24px; font-family:inherit; margin:1rem 0; resize:vertical;"></textarea>
+                <input id="postHashtags" placeholder="Hashtags (space separated)" maxlength="100" style="width:100%; background:#111; border:1px solid #1a3a3a; color:#0cf; padding:0.7rem 1rem; border-radius:24px; font-family:inherit; margin:0.5rem 0;">
+                <input type="file" id="postMedia" accept=".jpg,.jpeg,.png,.gif,.webp,.mp4" style="margin:0.5rem 0; color:#555;">
+                <div style="margin-top:1rem;">
+                    <button onclick="createPost()" class="round-btn">📤 Publish</button>
+                </div>
+            </div>
+        `;
+    }
+
+    async function createPost() {
+        const content = document.getElementById('postContent')?.value.trim();
+        const hashtags = document.getElementById('postHashtags')?.value.trim() || '';
+        const file = document.getElementById('postMedia')?.files[0];
+
+        if (!content) {
+            alert('⚠️ Post content is required');
+            return;
+        }
+
+        if (!isSafeInput(content) || !isSafeInput(hashtags)) {
+            alert('⚠️ Invalid characters detected');
+            return;
+        }
+
+        const fd = new FormData();
+        fd.append('content', content);
+        fd.append('hashtags', hashtags);
+        fd.append('title', '');
+        fd.append('is_secret', 'false');
+        fd.append('secret_password', '');
+        if (file) fd.append('file', file);
+
+        try {
+            const res = await fetch('/api/posts', { 
+                method: 'POST', 
+                body: fd, 
+                credentials: 'include' 
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                alert('⚠️ Error: ' + (err.error || 'Unknown error'));
+                return;
+            }
+
+            floatSymbols(['✦', '✧', '⋆', '·'], 5);
+            showFeed();
+        } catch(e) {
+            alert('⚠️ Error: ' + e.message);
+        }
+    }
+
+    // ============ ИНВАЙТЫ ============
+    async function showInvite() {
+        if (!currentUser?.isAdmin) {
+            alert('⚠️ Admin only');
+            return;
+        }
+
+        try {
+            const data = await apiCall('/api/invite', { method: 'POST' });
+            alert(`🔑 Invite Code: ${data.code}\n\nShare this code with others to register.`);
+            floatSymbols(['🔑', '✦', '✧'], 5);
+        } catch(e) {
+            alert('⚠️ Error generating invite: ' + e.message);
+        }
+    }
+
+    // ============ КЛАВИАТУРНЫЕ СОБЫТИЯ ============
+    document.addEventListener('keydown', function(e) {
+        // Enter на полях логина
+        if (e.key === 'Enter') {
+            const target = e.target;
+            if (target.id === 'globalKey' || target.id === 'loginUsername' || target.id === 'loginPassword') {
+                doLogin();
+            }
+            if (target.id === 'chatMsg') {
+                sendMsg();
             }
         }
+    });
 
-        res.json(decryptedPosts);
-    } catch(e) {
-        res.status(500).json({ error: 'Failed to get secret posts' });
-    }
-});
+    // ============ ЗАГРУЗКА ============
+    // Автоматическая загрузка пользователя
+    loadUser();
 
-// ✅ SECURE COMMENTS
-app.post('/api/comments', [
-    auth,
-    body('postId').isInt(),
-    body('content').isString().isLength({ min: 1, max: 500 })
-], async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-        return res.status(400).json({ error: 'Invalid input' });
-    }
-
-    const { postId, content } = req.body;
-
-    try {
-        // ✅ Проверяем, существует ли пост
-        const post = await safeQuery('SELECT id FROM posts WHERE id = ?', [postId]);
-        if (!post) {
-            return res.status(404).json({ error: 'Post not found' });
+    // Очистка интервалов при уходе со страницы
+    window.addEventListener('beforeunload', function() {
+        if (chatInterval) {
+            clearInterval(chatInterval);
         }
+    });
 
-        await safeRun(
-            'INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)',
-            [postId, req.userId, content]
-        );
-        res.json({ id: this.lastID });
-    } catch(e) {
-        res.status(500).json({ error: 'Failed to create comment' });
-    }
-});
-
-// ✅ DARK LOCKER с улучшенным шифрованием
-app.post('/api/dark-locker', [
-    auth,
-    body('title').isString().isLength({ min: 1, max: 100 }),
-    body('secret').isString().isLength({ min: 1 }),
-    body('password').isString().isLength({ min: 8 })
-], async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-        return res.status(400).json({ error: 'Invalid input' });
-    }
-
-    const { title, secret, password } = req.body;
-    
-    // ✅ Используем сильное шифрование
-    const encrypted = encryptSecret(secret, password);
-
-    try {
-        await safeRun(
-            'INSERT INTO dark_locker (user_id, title, encrypted_data) VALUES (?, ?, ?)',
-            [req.userId, title, encrypted]
-        );
-        res.json({ id: this.lastID });
-    } catch(e) {
-        res.status(500).json({ error: 'Failed to save secret' });
-    }
-});
-
-// ============ АУДИТ И ЛОГИ ============
-// ✅ Добавляем логирование важных действий
-function logAction(userId, action, details = '') {
-    const logEntry = {
-        timestamp: new Date().toISOString(),
-        userId,
-        action,
-        details,
-        ip: req?.ip || 'unknown'
-    };
-    fs.appendFileSync('audit.log', JSON.stringify(logEntry) + '\n');
-}
-
-// ============ БЕЗОПАСНЫЙ СТАРТ ============
-app.listen(PORT, '127.0.0.1', () => { // ✅ Только localhost
-    console.log(`Shadow Lanterns running securely on port ${PORT}`);
-});
+    console.log('🕯️ Shadow Lanterns loaded securely');
+</script>
+</body>
+</html>
