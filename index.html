@@ -519,12 +519,12 @@
         </div>
         
         <div class="nav">
-            <button onclick="showFeed()">📰 Feed</button>
-            <button onclick="showChat()">💬 Chat</button>
-            <button onclick="showFav()">⭐ Fav</button>
-            <button onclick="showFolders()">📁 Folders</button>
-            <button onclick="showAddPost()">✏️ Add Post</button>
-            <button id="inviteBtn" style="display:none;" onclick="showInvite()">🔑 Invite</button>
+            <button onclick="showFeed()"> Feed</button>
+            <button onclick="showChat()"> Chat</button>
+            <button onclick="showFav()"> Fav</button>
+            <button onclick="showFolders()"> Folders</button>
+            <button onclick="showAddPost()"> Add Post</button>
+            <button id="inviteBtn" style="display:none;" onclick="showInvite()"> Invite</button>
         </div>
         
         <div id="secretRow" class="secret-row" style="display:none;"></div>
@@ -668,12 +668,12 @@
 
         // Валидация
         if (!globalKey || !username || !password) {
-            document.getElementById('errorMsg').innerText = '⚠️ All fields are required';
+            document.getElementById('errorMsg').innerText = '✧ All fields are required';
             return;
         }
         
         if (!isSafeInput(username)) {
-            document.getElementById('errorMsg').innerText = '⚠️ Invalid characters in username';
+            document.getElementById('errorMsg').innerText = '✧ Invalid characters in username';
             return;
         }
 
@@ -708,7 +708,7 @@
                 await new Promise(r => setTimeout(r, 1000));
             }
         } catch(e) {
-            document.getElementById('errorMsg').innerText = '⚠️ Connection error';
+            document.getElementById('errorMsg').innerText = '✧ Connection error ✧';
         }
     }
 
@@ -747,7 +747,7 @@
 
             const data = await res.json();
             if (res.ok) {
-                document.getElementById('errorMsg').innerText = '✅ Registration successful!';
+                document.getElementById('errorMsg').innerText = '✧ Registration successful ✧';
                 await doLogin();
             } else {
                 document.getElementById('errorMsg').innerText = '⚠️ ' + (data.error || 'Registration failed');
@@ -1138,9 +1138,9 @@
                 });
                 alert('✅ User promoted to admin successfully!');
                 document.getElementById('promoteUserId').value = '';
-                floatSymbols(['👑', '⭐'], 3);
+                floatSymbols(['✧', '✧'], 3);
             } catch(e) {
-                alert('⚠️ Error: ' + e.message);
+                alert('✧ Error: ' + e.message);
             }
         };
 
@@ -1159,7 +1159,7 @@
                     </div>
                 `;
             } catch(e) {
-                alert('⚠️ Error loading stats: ' + e.message);
+                alert('✧ Error loading stats: ' + e.message);
             }
         };
     }
@@ -1466,7 +1466,7 @@
         try {
             const data = await apiCall('/api/invite', { method: 'POST' });
             alert(`🔑 Invite Code: ${data.code}\n\nShare this code with others to register.`);
-            floatSymbols(['🔑', '✦', '✧'], 5);
+            floatSymbols(['✧', '✦', '✧'], 5);
         } catch(e) {
             alert('⚠️ Error generating invite: ' + e.message);
         }
